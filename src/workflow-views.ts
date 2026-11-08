@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Identity } from './auth.ts'
 import type { WorkshopRequest } from './intake.ts'
 import { detailLabels } from './intake.ts'
-import { escape as h, layout, type Tenant } from './views.ts'
+import { backLink, button, escape as h, icon, layout, type Tenant } from './views.ts'
 import { canCoordinate, canReview, type detailsForStaff, type schoolAccess } from './workflow.ts'
 import { languages, type Scope } from './workflow-types.ts'
 import { venueZips, type searchRooms } from './venues.ts'
@@ -13,7 +13,7 @@ type RoomResults = Awaited<ReturnType<typeof searchRooms>>
 type StaffData = Awaited<ReturnType<typeof detailsForStaff>>
 
 const action = (path: string, content: string, label: string, primary = false) =>
-  `<form method="post" action="${h(path)}" class="fields">${content}<button class="${primary ? 'primary' : 'secondary'}">${h(label)}</button></form>`
+  `<form method="post" action="${h(path)}" class="fields">${content}${button(label, primary ? 'primary' : 'secondary')}</form>`
 const hidden = (key: string, value: unknown) => `<input type="hidden" name="${h(key)}" value="${h(value)}">`
 const input = (label: string, key: string, value = '', type = 'text', extra = '') =>
   `<label>${h(label)}<input type="${type}" name="${h(key)}" value="${h(value)}" ${extra}></label>`
@@ -23,7 +23,12 @@ const select = (label: string, key: string, items: [string, string][], current =
   `<label>${h(label)}<select name="${h(key)}"${required ? ' required' : ''}>${items.map(([value, title]) =>
     `<option value="${h(value)}"${current === value ? ' selected' : ''}>${h(title)}</option>`).join('')}</select></label>`
 const options = (values: string[]): [string, string][] => values.map(value => [value, value])
-const card = (title: string, content: string) => `<section class="card panel"><h2>${h(title)}</h2>${content}</section>`
+const card = (title: string, content: string, glyph?: string) =>
+  `<section class="card panel"><h2 class="with-icon">${glyph ? icon(glyph) : ''}${h(title)}</h2>${content}</section>`
+const stage = (id: string, number: string, title: string, glyph: string, content: string) =>
+  `<section class="card panel stage" id="${id}"><header class="stage-head">
+    <span class="feature-icon">${icon(glyph)}</span><div><span class="eyebrow">Step ${number}</span><h3>${title}</h3></div>
+  </header>${content}</section>`
 export const feedback = (message: string, error = false) =>
   `<p class="${error ? 'alert' : 'notice'}" role="${error ? 'alert' : 'status'}">${h(message)}</p>`
 
@@ -41,7 +46,7 @@ function localInput(value: string | undefined, timezone: string) {
 }
 
 function intakeFields(details: Record<string, string>, showEmail: boolean, requireEmail = false, publicIntake = false) {
-  return Object.entries(detailLabels).map(([key, label]) => {
+  const fields = Object.entries(detailLabels).map(([key, label]) => {
     const value = details[key] ?? ''
     if (key.endsWith('_language')) return select(label, key, [['', 'Choose a language'], ...options(languages)], value)
     if (key === 'format') return select(label, key, [['', 'Choose a format'], ...options(['In person', 'Virtual'])], value)
@@ -49,16 +54,17 @@ function intakeFields(details: Record<string, string>, showEmail: boolean, requi
     return input(label, key, value, 'text', 'maxlength="300"' + (publicIntake && ['school', 'contact', 'topic'].includes(key) ? ' required' : ''))
   }).join('') + (showEmail ? input('School contact email', 'email', details.email, 'email', `maxlength="254"${requireEmail ? ' required' : ''}`) +
     input('School contact phone (optional)', 'phone', details.phone, 'tel', 'maxlength="16" placeholder="+13055550123"') : '')
+  return `<div class="intake-fields">${fields}</div>`
 }
 
 export function intakeView(scope: Workspace, actor?: Identity, submitted = false) {
-  return layout('Request a workshop', `<section class="page-head"><p class="eyebrow">WORKSHOP INTAKE</p>
+  return layout('Request a workshop', `<section class="page-head"><p class="eyebrow">${icon('school')} School intake</p>
     <h1>${actor ? 'Record school intake' : 'Request a workshop'}</h1>
     <p class="lede">Tell us about the school and group. Use class-level information.</p></section>
     ${submitted ? feedback('Your request was received. A coordinator will review it.') :
       card('School and workshop details', action(actor ? '/intake/staff' : '/intake',
         hidden('submission', randomUUID()) + (actor ? select('Channel', 'channel', [['phone', 'Staff-entered phone'], ['simulated_sms', 'Simulated SMS']]) : '') +
-        intakeFields({}, true, !actor, true), 'Submit request', true))}`, scope, actor)
+        intakeFields({}, true, !actor, true), 'Submit request', true), 'assignment')}`, scope, actor, { section: 'intake', page: 'focused' })
 }
 
 function slots(path: string, workflow: WorkshopRequest['workflow'], timezone: string) {
@@ -87,37 +93,34 @@ export function workflowPanel(scope: Workspace, actor: Identity, request: Worksh
   return `<div id="workflow" class="workflow stack">
     <section class="page-head"><h2>Workshop workflow</h2><p>Dates and times use ${h(scope.timezone)}.</p>
       ${request.exception ? feedback(request.exception, true) : ''}</section>
-    <div class="columns">
-      <div class="stack">
-        ${card('1 · Intake and automation', coordinator ? `
+    <div class="workflow-grid">
+        ${stage('intake-actions', '1', 'Intake and automation', 'assignment', coordinator ? `
           <details><summary>Edit intake details</summary>${action(path + '/details', intakeFields(request.details, true), 'Save intake details')}</details>
           <details><summary>Assign request owner</summary>${action(path + '/owner',
             select('Coordinator', 'owner', data.owners.map(owner => [owner.id, owner.name]), request.owner_id), 'Assign owner')}</details>
           <div class="inline-actions">${request.proposed_follow_up ? action(path + '/follow-up', '', 'Queue follow-up') : ''}
           ${action(path + '/pause', '', request.paused ? 'Resume automation' : 'Pause automation')}
           ${workflow.exception ? action(path + '/dismiss', '', 'Mark exception reviewed') : ''}</div>` : '<p>A coordinator manages intake and automation.</p>')}
-        ${card('2 · Planning call', `${slots(path + '/book', coordinator ? workflow : { planning: workflow.planning }, scope.timezone)}
+        ${stage('planning', '2', 'Planning call', 'calendar_month', `${slots(path + '/book', coordinator ? workflow : { planning: workflow.planning }, scope.timezone)}
           ${coordinator && !workflow.planning ? action(path + '/offer',
             input('Search window starts', 'planning_start', '', 'datetime-local', 'required') +
             input('Search window ends', 'planning_end', '', 'datetime-local', 'required'), 'Offer free 30-minute slots') : ''}
           ${coordinator ? `<details><summary>Planning notes</summary>${action(path + '/notes',
             textarea('Class-level notes', 'notes', 2000, workflow.planningNotes), 'Save planning notes')}</details>` :
             (workflow.planningNotes ? `<pre>${h(workflow.planningNotes)}</pre>` : '')}`)}
-        ${card('3 · Workshop date and location', `
+        ${stage('location', '3', 'Workshop date and location', 'location_on', `
           <p>${workshop?.location ? `${h(dateTime(workshop.start, scope.timezone))} · ${h(workshop.location)}` : 'Workshop logistics pending.'}</p>
           ${coordinator ? `<details><summary>Use the school room or a virtual link</summary>${action(path + '/workshop',
             timeInputs(workshop?.start, workshop?.end) + select('Location type', 'mode', [['school', 'School room'], ['virtual', 'Virtual meeting']], request.details.format === 'Virtual' ? 'virtual' : 'school') +
             input('Room name or HTTPS meeting link', 'location', workshop?.mode === 'room' ? '' : workshop?.location, 'text', 'required maxlength="300"'), 'Save workshop logistics')}</details>
             ${request.details.format === 'In person' ? `<details><summary>Find a simulated room</summary>${roomSearch}</details>` : ''}` : ''}`)}
-      </div>
-      <div class="stack">
-        ${card('4 · School contacts and permissions', `
+        ${stage('school-contacts', '4', 'School contacts and permissions', 'contact_mail', `
           <ul class="activity">${data.links.map(link => `<li><strong>${h(link.contact)}</strong> · ${h(link.purpose)}${link.revoked ? ' · revoked' : ''}
             ${coordinator && !link.revoked ? action(path + '/revoke', hidden('link', link.id), 'Revoke link') : ''}</li>`).join('') || '<li>No school links yet.</li>'}</ul>
           ${coordinator ? action(path + '/link', input('School contact name', 'contact', '', 'text', 'required maxlength="100"') +
             input('School contact email', 'email', '', 'email', 'required') +
             select('Permission', 'purpose', [['collaborator', 'Collaborate and comment'], ['approver', 'Designated school approver']]), 'Create school link') : ''}`)}
-        ${card('5 · Slide versions and school review', `
+        ${stage('school-review', '5', 'Slide versions and school review', 'description', `
           <ul class="activity">${data.versions.map(version => `<li><a href="${path}/deck/${version.version}">Open deck v${version.version}</a>
             · ${h(version.content.language)} · ${version.version === latest?.version ? 'Current' : 'Previous'}
             · ${version.shared_at ? 'Shared' : version.cleared_at ? 'Cleared' : 'Draft'}
@@ -132,13 +135,12 @@ export function workflowPanel(scope: Workspace, actor: Identity, request: Worksh
           <details><summary>School feedback (${data.comments.length})</summary>
             <ul class="activity">${data.comments.map(comment => `<li><strong>${h(comment.contact)}</strong> · v${comment.version}<pre>${h(comment.body)}</pre></li>`).join('') || '<li>No feedback yet.</li>'}</ul>
           </details>`)}
-        ${card('6 · Confirmation and reminders', `<p>Logistics check · ${h(workflow.reminder?.replaceAll('_', ' ') ?? 'pending')}</p>
+        ${stage('confirmation', '6', 'Confirmation and reminders', 'notifications', `<p>Logistics check · ${h(workflow.reminder?.replaceAll('_', ' ') ?? 'pending')}</p>
           ${coordinator ? `<div class="inline-actions">${request.status === 'confirmed'
             ? action(path + '/reopen', '', 'Reopen workshop') + action(path + '/demo-reminder', '', 'Run simulated day-before check')
             : action(path + '/confirm', '', 'Confirm workshop', true)}</div>` : ''}`)}
-      </div>
     </div>
-    <div class="columns">
+    <div class="columns" id="activity">
       ${card('Conversation history', `<ul class="activity">${data.messages.map(item => `<li><details>
         <summary>${h(item.subject)} · ${h(item.source.replaceAll('_', ' '))}</summary><small>${h(item.sender)}</small><pre>${h(item.body)}</pre></details></li>`).join('')}</ul>`)}
       ${card('Activity and delivery', `<ul class="activity">${data.jobs.map(job => `<li><strong>${h(job.kind.replaceAll('_', ' '))}</strong> · ${h(job.state)}
@@ -151,15 +153,27 @@ export function workflowPanel(scope: Workspace, actor: Identity, request: Worksh
 
 export function roomResultsView(scope: Workspace, actor: Identity, id: string, form: URLSearchParams, rooms: RoomResults) {
   const params = [...form.entries()].filter(([key]) => ['workshop_start', 'workshop_end', 'zip', 'radius', 'required', 'preferred'].includes(key))
-  return layout('Simulated room search', `<section class="page-head"><a class="back" href="/requests/${id}">← Request</a>
-    <p class="eyebrow">FICTIONAL INVENTORY</p><h1>Simulated room search</h1><p>Distances are approximate from ZIP ${h(form.get('zip'))}.</p></section>
-    <div class="stack">${rooms.map(room => card(`${room.venue} · ${room.room}`, `<p>${room.distance.toFixed(1)} mi ·
-      Capacity ${room.capacity} · ${h(room.amenities.join(', '))}</p>${room.reasons.length ? `<p class="alert">${h(room.reasons.join(' · '))}</p>` :
-      action(`/requests/${id}/reserve`, params.map(([key, value]) => hidden(key, value)).join('') + hidden('room', room.id), 'Reserve simulated room')}`)).join('')}</div>`, scope, actor)
+  const eligible = rooms.filter(room => !room.reasons.length)
+  const unavailable = rooms.filter(room => room.reasons.length)
+  const result = (room: RoomResults[number]) => `<li class="room-row">
+    <span class="feature-icon">${icon('location_on')}</span><div class="room-summary">
+      <h3>${h(room.room)}</h3><p>${h(room.venue)} · ${room.distance.toFixed(1)} mi · Capacity ${room.capacity}</p>
+      ${room.reasons.length ? `<p class="room-reason">${h(room.reasons.join(' · '))}</p>` :
+      `<p>${h(room.amenities.join(', '))}</p>${action(`/requests/${id}/reserve`,
+        params.map(([key, value]) => hidden(key, value)).join('') + hidden('room', room.id), 'Reserve simulated room')}`}
+    </div></li>`
+  return layout('Simulated room search', `<section class="page-head">${backLink('/requests/' + id, 'Workshop request')}
+    <p class="eyebrow">${icon('location_on')} Fictional inventory</p><h1>Simulated room search</h1>
+    <p class="lede">Distances are approximate from ZIP ${h(form.get('zip'))}.</p></section>
+    <div class="columns room-results">
+      ${card('Available rooms', eligible.length ? `<ul class="room-list">${eligible.map(result).join('')}</ul>` :
+        '<p>No rooms meet these requirements. Return to the request to change your search.</p>', 'check_circle')}
+      ${unavailable.length ? card('Unavailable rooms', `<ul class="room-list unavailable">${unavailable.map(result).join('')}</ul>`, 'info') : ''}
+    </div>`, scope, actor)
 }
 
 export function issuedLinkView(scope: Workspace, actor: Identity, id: string, link: string) {
-  return layout('School link ready', `<section class="page-head"><a class="back" href="/requests/${id}">← Request</a>
+  return layout('School link ready', `<section class="page-head">${backLink('/requests/' + id, 'Workshop request')}
     <h1>School link ready</h1></section>${card('Share with the designated contact', `<p>Anyone with this link can act as that contact. Copy it now, or issue a new link later.</p>
     <p class="link-copy"><a href="${h(link)}">${h(link)}</a></p>`)}`, scope, actor)
 }
@@ -181,14 +195,14 @@ export function schoolView(scope: Scope & Tenant, token: string, access: Awaited
         ${grant.purpose === 'approver' ? (deck.approved_at ? '<p>This version has been approved.</p>' :
           action(path + '/approve', hidden('version', deck.version), `Approve deck v${deck.version}`, true)) : ''}` : '<p>Staff will share slides when they are ready for review.</p>')}
     </div>`
-  return layout(heading, `<section class="page-head"><p class="eyebrow">SCHOOL COLLABORATION</p><h1>${heading}</h1>
+  return layout(heading, `<section class="page-head"><p class="eyebrow">${icon('school')} School collaboration</p><h1>${heading}</h1>
     <p class="lede">${h(record.details.school ?? 'School')} · ${h(grant.contact)} · ${h(scope.timezone)}</p></section>
-    ${saved ? feedback('Your response was recorded.') : ''}${content}`, scope)
+    ${saved ? feedback('Your response was recorded.') : ''}${content}`, scope, undefined, { page: 'focused' })
 }
 
 export function settingsView(scope: Workspace, actor: Identity, data: Awaited<ReturnType<typeof settings>>, google: boolean, message?: string) {
-  return layout('Workspace settings', `<section class="page-head"><a class="back" href="/">← Coordinator queue</a><h1>Workspace settings</h1></section>
-    ${message ? feedback(message) : ''}<div class="columns"><div class="stack">
+  return layout('Workspace settings', `<section class="page-head">${backLink('/', 'Coordinator queue')}<h1>Workspace settings</h1></section>
+    ${message ? feedback(message) : ''}<div class="columns settings-layout"><div class="stack">
       ${card('Branding and defaults', action('/settings/branding',
         input('Organization name', 'name', scope.name, 'text', 'required maxlength="100"') + input('Brand color', 'accent', scope.accent, 'color') +
         input('Time zone', 'timezone', scope.timezone, 'text', 'required') +
@@ -209,5 +223,5 @@ export function settingsView(scope: Workspace, actor: Identity, data: Awaited<Re
           ${connection ? action('/settings/provider', hidden('kind', kind) + input(kind === 'mail' ? 'Gmail test label ID' : 'Calendar ID', 'resource', connection.resource, 'text', 'required'), 'Save provider resource') +
             action('/settings/disconnect', hidden('kind', kind), 'Disconnect provider') : ''}`)
       }).join('')}
-    </div></div>`, scope, actor)
+    </div></div>`, scope, actor, { section: 'settings' })
 }

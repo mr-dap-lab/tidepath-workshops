@@ -2,6 +2,12 @@
 
 Tidepath moves a school inquiry through intake, a planning call, workshop logistics, versioned slide review, confirmation, and a day-before access check. It runs locally with simulated mail, calendar, and rooms. Google sign-in, Gmail, and Google Calendar can be enabled independently of the demo data.
 
+## Video demo
+
+Follow a school request from the coordinator queue through scheduling, slide approval, and the day-before logistics check.
+
+https://github.com/user-attachments/assets/96017f4c-328e-4483-9b61-ee23a1e90200
+
 ## Run locally
 
 Install Node.js 24+ and start PostgreSQL 15+. The commands below assume PostgreSQL accepts connections as your current user. Set `DATABASE_URL` in `.env` if your installation uses different credentials.

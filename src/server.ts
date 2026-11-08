@@ -20,7 +20,11 @@ if (!Number.isInteger(port) || port < 1024 || port > 65535) {
 const slugPattern = /^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/
 const requestPath = /^\/(api\/)?requests\/([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/i
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const css = await readFile(new URL('./app.css', import.meta.url), 'utf8')
+const uiAssets = new Map(await Promise.all([
+  ['assets/manrope.woff2', 'font/woff2'],
+  ['assets/roboto-flex.woff2', 'font/woff2'],
+  ['assets/material-symbols.woff2', 'font/woff2'],
+].map(async ([file, type]) => ['/' + file, { type, body: await readFile(new URL('./' + file, import.meta.url)) }] as const)))
 const platform = new URL(process.env.APP_ORIGIN ?? `http://localhost:${port}`)
 if (!['https:', 'http:'].includes(platform.protocol) || platform.pathname !== '/' || platform.username ||
     platform.password || platform.search || platform.hash || (platform.protocol === 'http:' && platform.hostname !== 'localhost')) {
@@ -31,7 +35,7 @@ const originFor = (slug?: string | null) => slug ? platform.origin.replace('://'
 const tokenPattern = /^[a-f0-9]{64}$/
 
 
-function respond(res: ServerResponse, status: number, body: string, type = 'text/html; charset=utf-8') {
+function respond(res: ServerResponse, status: number, body: string | Buffer, type = 'text/html; charset=utf-8') {
   res.writeHead(status, { 'Content-Type': type }).end(body)
 }
 
@@ -119,7 +123,7 @@ async function provision(form: URLSearchParams) {
 
 async function handle(req: IncomingMessage, res: ServerResponse) {
   res.setHeader('Cache-Control', 'no-store')
-  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'self'; style-src-attr 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://accounts.google.com")
+  res.setHeader('Content-Security-Policy', "default-src 'none'; font-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://accounts.google.com")
   res.setHeader('Referrer-Policy', 'same-origin')
   res.setHeader('X-Content-Type-Options', 'nosniff')
 
@@ -139,8 +143,10 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   const method = req.method
 
   if (method === 'GET' && path === '/app.css') {
-    return respond(res, 200, css, 'text/css; charset=utf-8')
+    return respond(res, 200, await readFile(new URL('./app.css', import.meta.url)), 'text/css; charset=utf-8')
   }
+  const asset = method === 'GET' ? uiAssets.get(path) : undefined
+  if (asset) return respond(res, 200, asset.body, asset.type)
 
   const tenant = slug ? (await db.query<Workspace>(
     'SELECT id, slug, name, accent, timezone, language, suspended FROM tenants WHERE slug = $1', [slug],
@@ -309,7 +315,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       }
     }
     if (method === 'GET') {
-      if (path === '/') return respond(res, 200, queueView(tenant, identity, await listRequests(tenant.id)))
+      if (path === '/') return respond(res, 200, queueView(tenant, identity, await listRequests(tenant.id), url.searchParams.get('view')))
       if (path === '/api/requests') return json(res, 200, await listRequests(tenant.id))
       const match = requestPath.exec(path)
       if (match) {
