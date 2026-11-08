@@ -1,0 +1,25 @@
+{
+  "name": "tidepath-workshops",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=.env src/server.ts",
+    "start": "node --env-file-if-exists=.env src/server.ts",
+    "setup": "node --env-file-if-exists=.env src/setup.ts",
+    "check": "tsc --noEmit",
+    "test": "node --test",
+    "worker": "node --env-file-if-exists=.env src/worker.ts"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/pg": "^8.23.1",
+    "typescript": "^5.9.3"
+  }
+}
